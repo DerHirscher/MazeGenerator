@@ -122,6 +122,7 @@ public class MazeGenerator extends Application {
         segmentCount = width * height;
         MazeField[] lastRow = new MazeField[width];
         path.add(new MazeField(0, 0));
+        int loopsLeft = 0;
 
         for (int h = 0; h < height; h++) {
             MazeField lastField = null;
@@ -150,12 +151,17 @@ public class MazeGenerator extends Application {
                 segment1.mazeFields.addAll(segment2.mazeFields);
                 walls.remove(wall);
                 segmentCount--;
+            } else if (loopsLeft > 0) {
+                walls.remove(wall);
+                loopsLeft--;
             }
         }
         generatorStarted = false;
     }
 
     private void drawMaze(@NotNull Canvas canvas) {
+        System.out.println(segmentCount + " " + walls.size());
+
         GraphicsContext gc = canvas.getGraphicsContext2D();
 
         if (canvas.getWidth() > canvas.getHeight()) {
