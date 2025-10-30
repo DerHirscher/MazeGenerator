@@ -20,12 +20,14 @@ public class MazeGenerator extends Application {
     private final CopyOnWriteArrayList<MazeWall> walls = new CopyOnWriteArrayList<>();
     private final ArrayList<MazeField> path = new ArrayList<>();
 
-    private int width = 20;
-    private int height = 20;
+    private int width = 10;
+    private int height = 10;
     private double fieldSize = 0;
     private double x0 = 0;
     private double y0 = 0;
     private int segmentCount = 0;
+    private boolean generatorStarted = false;
+    private boolean finished = false;
 
     @Override
     public void start(@NotNull Stage stage) {
@@ -38,29 +40,63 @@ public class MazeGenerator extends Application {
         Platform.runLater(() -> stage.setFullScreen(true));
 
         scene.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.N) {
+            if (event.getCode() == KeyCode.N && !generatorStarted) {
+                generatorStarted = true;
                 walls.clear();
                 path.clear();
-                width++;
-                height++;
+                finished = false;
+                width += 5;
+                height += 5;
                 new Thread(this::createMaze).start();
+            }
+            if (event.getCode() == KeyCode.BACK_SPACE && !(path.size() == 1)) {
+                path.removeLast();
             }
         });
 
         scene.setOnMouseDragged(event -> {
-            if (event.getButton() == MouseButton.PRIMARY && event.getX() >= x0 && event.getX() <= x0 + width * fieldSize && event.getY() >= y0 && event.getY() <= y0 + height * fieldSize && segmentCount == 1) {
+            if (!finished
+                    && event.getButton() == MouseButton.PRIMARY
+                    && event.getX() >= x0
+                    && event.getX() <= x0 + width * fieldSize
+                    && event.getY() >= y0
+                    && event.getY() <= y0 + height * fieldSize
+                    && segmentCount == 1) {
+
                 int fieldX = (int) Math.floor((event.getX() - x0) / fieldSize);
                 int fieldY = (int) Math.floor((event.getY() - y0) / fieldSize);
 
-                if (path.isEmpty() || path.getLast().x() != fieldX || path.getLast().y() != fieldY) {
-                    path.add(new MazeField(fieldX, fieldY));
+                Iterator<MazeField> iterator = path.iterator();
+                boolean removeNext = false;
+                while (iterator.hasNext()) {
+                    MazeField field = iterator.next();
+                    if (!removeNext) {
+                        if (fieldX == field.x() && fieldY == field.y()) {
+                            removeNext = true;
+                        }
+                    } else {
+                        iterator.remove();
+                    }
                 }
-            }
-        });
 
-        scene.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.BACK_SPACE && !path.isEmpty()) {
-                path.removeLast();
+                if ((path.getLast().x() != fieldX
+                        || path.getLast().y() != fieldY)
+                        && (((fieldX == path.getLast().x() - 1
+                        || fieldX == path.getLast().x() + 1)
+                        && fieldY == path.getLast().y())
+                        ^ ((fieldY == path.getLast().y() - 1
+                        || fieldY == path.getLast().y() + 1)
+                        && fieldX == path.getLast().x()))) {
+
+                    if (isPassable(fieldX, fieldY, path.getLast().x(), path.getLast().y())) {
+                        path.add(new MazeField(fieldX, fieldY));
+
+                        if (fieldX == width - 1 && fieldY == height - 1) {
+                            finished = true;
+                        }
+                    }
+                }
+
             }
         });
 
@@ -81,9 +117,11 @@ public class MazeGenerator extends Application {
     }
 
     private void createMaze() {
+        generatorStarted = true;
         MazeSegment[][] mazeSegments = new MazeSegment[width][height];
         segmentCount = width * height;
         MazeField[] lastRow = new MazeField[width];
+        path.add(new MazeField(0, 0));
 
         for (int h = 0; h < height; h++) {
             MazeField lastField = null;
@@ -114,6 +152,7 @@ public class MazeGenerator extends Application {
                 segmentCount--;
             }
         }
+        generatorStarted = false;
     }
 
     private void drawMaze(@NotNull Canvas canvas) {
@@ -135,6 +174,7 @@ public class MazeGenerator extends Application {
 
         final int c = (int) (255 * ((double) segmentCount / (width * height)));
         gc.setStroke(Color.rgb(c, 255 - c, 0));
+        gc.setLineWidth(1);
         gc.strokeRect(x0, y0, width * fieldSize, height * fieldSize);
 
         walls.forEach(w -> {
@@ -156,7 +196,10 @@ public class MazeGenerator extends Application {
             }
         });
 
-        gc.setStroke(Color.BLUE);
+        if (finished) gc.setStroke(Color.rgb(0, 255, 0));
+        else gc.setStroke(Color.BLUE);
+
+        gc.setLineWidth(10);
         MazeField lastField = null;
         for (MazeField field : path) {
             if (lastField != null) {
@@ -164,5 +207,15 @@ public class MazeGenerator extends Application {
             }
             lastField = field;
         }
+    }
+
+    private boolean isPassable(int x1, int y1, int x2, int y2) {
+        for (MazeWall w : walls) {
+            if ((w.mazeField1().x() == x1 && w.mazeField1().y() == y1 && w.mazeField2().x() == x2 && w.mazeField2().y() == y2)
+                    || (w.mazeField1().x() == x2 && w.mazeField1().y() == y2 && w.mazeField2().x() == x1 && w.mazeField2().y() == y1)) {
+                return false;
+            }
+        }
+        return true;
     }
 }
