@@ -8,19 +8,27 @@ import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseButton;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class MazeGenerator extends Application {
     private final CopyOnWriteArrayList<MazeWall> walls = new CopyOnWriteArrayList<>();
-    private final int width = 200;
-    private final int height = 200;
+    private final ArrayList<MazeField> path = new ArrayList<>();
+
+    private int width = 20;
+    private int height = 20;
+    private double fieldSize = 0;
+    private double x0 = 0;
+    private double y0 = 0;
     private int segmentCount = 0;
+
     @Override
-    public void start(Stage stage) {
+    public void start(@NotNull Stage stage) {
         Group root = new Group();
         Scene scene = new Scene(root);
         stage.setTitle("Maze Generator");
@@ -32,7 +40,27 @@ public class MazeGenerator extends Application {
         scene.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.N) {
                 walls.clear();
+                path.clear();
+                width++;
+                height++;
                 new Thread(this::createMaze).start();
+            }
+        });
+
+        scene.setOnMouseDragged(event -> {
+            if (event.getButton() == MouseButton.PRIMARY && event.getX() >= x0 && event.getX() <= x0 + width * fieldSize && event.getY() >= y0 && event.getY() <= y0 + height * fieldSize && segmentCount == 1) {
+                int fieldX = (int) Math.floor((event.getX() - x0) / fieldSize);
+                int fieldY = (int) Math.floor((event.getY() - y0) / fieldSize);
+
+                if (path.isEmpty() || path.getLast().x() != fieldX || path.getLast().y() != fieldY) {
+                    path.add(new MazeField(fieldX, fieldY));
+                }
+            }
+        });
+
+        scene.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.BACK_SPACE && !path.isEmpty()) {
+                path.removeLast();
             }
         });
 
@@ -73,7 +101,7 @@ public class MazeGenerator extends Application {
         }
 
         Random rand = new Random();
-        while (segmentCount > 1) {
+        while (segmentCount > 1 && !walls.isEmpty()) {
             MazeWall wall = walls.get(rand.nextInt(walls.size()));
             MazeSegment segment1 = mazeSegments[wall.mazeField1().x()][wall.mazeField1().y()];
             MazeSegment segment2 = mazeSegments[wall.mazeField2().x()][wall.mazeField2().y()];
@@ -88,13 +116,9 @@ public class MazeGenerator extends Application {
         }
     }
 
-    private void drawMaze(Canvas canvas) {
+    private void drawMaze(@NotNull Canvas canvas) {
         GraphicsContext gc = canvas.getGraphicsContext2D();
 
-        double x0;
-        double y0;
-
-        double fieldSize;
         if (canvas.getWidth() > canvas.getHeight()) {
             fieldSize = canvas.getHeight() / height;
             x0 = (canvas.getWidth() - width * fieldSize) / 2;
@@ -131,5 +155,14 @@ public class MazeGenerator extends Application {
                 }
             }
         });
+
+        gc.setStroke(Color.BLUE);
+        MazeField lastField = null;
+        for (MazeField field : path) {
+            if (lastField != null) {
+                gc.strokeLine(x0 + (lastField.x() + 0.5) * fieldSize, y0 + (lastField.y() + 0.5) * fieldSize, x0 + (field.x() + 0.5) * fieldSize, y0 + (field.y() + 0.5) * fieldSize);
+            }
+            lastField = field;
+        }
     }
 }
