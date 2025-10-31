@@ -124,7 +124,7 @@ public class MazeGenerator extends Application {
         segmentCount = width * height;
         MazeField[] lastRow = new MazeField[width];
         resetPath();
-        int loopsLeft = 50;
+        int loopsLeft = 0;
 
         for (int h = 0; h < height; h++) {
             MazeField lastField = null;
