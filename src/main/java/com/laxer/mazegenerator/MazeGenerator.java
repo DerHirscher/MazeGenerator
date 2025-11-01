@@ -2,7 +2,7 @@ package com.laxer.mazegenerator;
 
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
-import javafx.application.Platform;
+import javafx.scene.Cursor;
 import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
@@ -15,19 +15,29 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.Predicate;
 
 public class MazeGenerator extends Application {
     private final CopyOnWriteArrayList<MazeWall> walls = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<MazeField> path = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArraySet<MazeField> segmentLessFields = new CopyOnWriteArraySet<>();
 
-    private int width = 200;
-    private int height = 200;
+    private final int allowedLoops = 0;
+    private final int width = 200;
+    private final int height = 200;
+    private MazeField start = new MazeField(0, 0);
+    private MazeField end = new MazeField(width / 2, height / 2);
+    private final Predicate<MazeField> slfPredicate  = field -> false;
+
     private double fieldSize = 0;
     private double x0 = 0;
     private double y0 = 0;
     private int segmentCount = 0;
     private boolean generatorStarted = false;
     private boolean finished = false;
+    private boolean startPicked = true;
+    private boolean endPicked = true;
 
     @Override
     public void start(@NotNull Stage stage) {
@@ -37,27 +47,50 @@ public class MazeGenerator extends Application {
         stage.setScene(scene);
         stage.setFullScreenExitHint("");
         stage.show();
-        Platform.runLater(() -> stage.setFullScreen(true));
+//        Platform.runLater(() -> stage.setFullScreen(true));
 
         scene.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.N && !generatorStarted) {
+            if (event.getCode() == KeyCode.N && !generatorStarted && startPicked && endPicked) {
                 generatorStarted = true;
                 walls.clear();
                 finished = false;
-                width += 5;
-                height += 5;
                 new Thread(this::createMaze).start();
             }
-            if (event.getCode() == KeyCode.BACK_SPACE && !(path.size() == 1)) {
+            if (event.getCode() == KeyCode.BACK_SPACE && !(path.size() == 1) && startPicked && endPicked) {
                 path.removeLast();
             }
-            if (event.getCode() == KeyCode.S && !generatorStarted) {
+            if (event.getCode() == KeyCode.S && !generatorStarted && startPicked && endPicked) {
                 new Thread(this::solve).start();
+            }
+            if (event.getCode() == KeyCode.R && !generatorStarted) {
+                resetPath();
+                finished = false;
+            }
+            if (event.getCode() == KeyCode.P && !generatorStarted && !finished) {
+                scene.setCursor(Cursor.HAND);
+                startPicked = false;
+            }
+        });
+
+        scene.setOnMousePressed(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                if (!startPicked) {
+                    start = new MazeField((int) ((event.getX() - x0) / fieldSize), (int) ((event.getY() - y0) / fieldSize));
+                    startPicked = true;
+                    endPicked = false;
+                } else if (!endPicked) {
+                    end = new MazeField((int) ((event.getX() - x0) / fieldSize), (int) ((event.getY() - y0) / fieldSize));
+                    endPicked = true;
+                    scene.setCursor(Cursor.DEFAULT);
+                    resetPath();
+                }
             }
         });
 
         scene.setOnMouseDragged(event -> {
             if (!finished
+                    && startPicked
+                    && endPicked
                     && event.getButton() == MouseButton.PRIMARY
                     && event.getX() >= x0
                     && event.getX() <= x0 + width * fieldSize
@@ -68,17 +101,19 @@ public class MazeGenerator extends Application {
                 int fieldX = (int) Math.floor((event.getX() - x0) / fieldSize);
                 int fieldY = (int) Math.floor((event.getY() - y0) / fieldSize);
 
-                Iterator<MazeField> iterator = path.iterator();
-                boolean removeNext = false;
-                while (iterator.hasNext()) {
-                    MazeField field = iterator.next();
-                    if (!removeNext) {
+                boolean found = false;
+                List<MazeField> toRemove = new ArrayList<>();
+                for (MazeField field : path) {
+                    if (!found) {
                         if (fieldX == field.x() && fieldY == field.y()) {
-                            removeNext = true;
+                            found = true;
                         }
                     } else {
-                        iterator.remove();
+                        toRemove.add(field);
                     }
+                }
+                if (!toRemove.isEmpty()) {
+                    path.removeAll(toRemove);
                 }
 
                 if ((path.getLast().x() != fieldX
@@ -93,7 +128,7 @@ public class MazeGenerator extends Application {
                     if (isPassable(fieldX, fieldY, path.getLast().x(), path.getLast().y())) {
                         path.add(new MazeField(fieldX, fieldY));
 
-                        if (fieldX == width - 1 && fieldY == height - 1) {
+                        if (fieldX == end.x() && fieldY == end.y()) {
                             finished = true;
                         }
                     }
@@ -124,28 +159,39 @@ public class MazeGenerator extends Application {
         segmentCount = width * height;
         MazeField[] lastRow = new MazeField[width];
         resetPath();
-        int loopsLeft = 0;
+        int loopsLeft = allowedLoops;
+        Random rand = new Random();
 
         for (int h = 0; h < height; h++) {
             MazeField lastField = null;
             for (int w = 0; w < width; w++) {
                 MazeField newField = new MazeField(w, h);
-                mazeSegments[w][h] = new MazeSegment(newField);
-                if (lastField != null) {
+                if (!slfPredicate.test(newField)) {
+                    mazeSegments[w][h] = new MazeSegment(newField);
+                } else segmentLessFields.add(newField);
+
+                if (lastField != null && !(segmentLessFields.contains(lastField) && segmentLessFields.contains(newField))) {
                     walls.add(new MazeWall(lastField, newField));
                 }
-                if (lastRow[w] != null) {
+                if (lastRow[w] != null && !(segmentLessFields.contains(lastRow[w]) && segmentLessFields.contains(newField))) {
                     walls.add(new MazeWall(lastRow[w], newField));
                 }
                 lastField = lastRow[w] = newField;
             }
         }
 
-        Random rand = new Random();
+//        for (MazeField segmentLessField : segmentLessFields) {
+//            mazeSegments[segmentLessField.x()][segmentLessField.y()] = null;
+//        }
+        segmentCount -= segmentLessFields.size();
+
         while (segmentCount > 1 && !walls.isEmpty()) {
             MazeWall wall = walls.get(rand.nextInt(walls.size()));
             MazeSegment segment1 = mazeSegments[wall.mazeField1().x()][wall.mazeField1().y()];
             MazeSegment segment2 = mazeSegments[wall.mazeField2().x()][wall.mazeField2().y()];
+
+            if (segment1 == null || segment2 == null) continue;
+
             if (segment1 != segment2) {
                 for (MazeField mazeField : segment2.mazeFields) {
                     mazeSegments[mazeField.x()][mazeField.y()] = segment1;
@@ -167,25 +213,28 @@ public class MazeGenerator extends Application {
         Set<MazeField> visited = new HashSet<>();
         visited.add(path.getFirst());
 
-        while (!(path.getLast().x() == width - 1 && path.getLast().y() == height - 1)) {
+        while (!(path.getLast().x() == end.x() && path.getLast().y() == end.y())) {
             int lastX = path.getLast().x();
             int lastY = path.getLast().y();
 
+            SolvingOrder order = SolvingOrder.getOrder(lastX, lastY, end.x(), end.y(), width, height);
+
             MazeField next = null;
-            if (lastX < width - 1 && isPassable(lastX, lastY, lastX + 1, lastY) && !visited.contains(new MazeField(lastX + 1, lastY))) {
-                next = new MazeField(lastX + 1, lastY);
-            } else if (lastY < height - 1 && isPassable(lastX, lastY, lastX, lastY + 1) && !visited.contains(new MazeField(lastX, lastY + 1))) {
-                next = new MazeField(lastX, lastY + 1);
-            } else if (lastX > 0 && isPassable(lastX, lastY, lastX - 1, lastY) && !visited.contains(new MazeField(lastX - 1, lastY))) {
-                next = new MazeField(lastX - 1, lastY);
-            } else if (lastY > 0 && isPassable(lastX, lastY, lastX, lastY - 1)  && !visited.contains(new MazeField(lastX, lastY - 1))) {
-                next = new MazeField(lastX, lastY - 1);
-            } else {
-                path.removeLast();
+
+            for (SolvingOrder.Direction direction : order.order) {
+                int nextX = lastX + direction.x;
+                int nextY = lastY + direction.y;
+
+                if (nextX >= 0 && nextX < width && nextY >= 0 && nextY < height && isPassable(lastX, lastY, nextX, nextY) && !visited.contains(new MazeField(nextX, nextY))) {
+                    next = new MazeField(nextX, nextY);
+                    break;
+                }
             }
             if (next != null) {
                 path.add(next);
                 visited.add(next);
+            } else {
+                path.removeLast();
             }
         }
         finished = true;
@@ -194,7 +243,7 @@ public class MazeGenerator extends Application {
     private void drawMaze(@NotNull Canvas canvas) {
         GraphicsContext gc = canvas.getGraphicsContext2D();
 
-        if (canvas.getWidth() > canvas.getHeight()) {
+        if ((double) width / height < canvas.getWidth() / canvas.getHeight()) {
             fieldSize = canvas.getHeight() / height;
             x0 = (canvas.getWidth() - width * fieldSize) / 2;
             y0 = 0;
@@ -246,6 +295,35 @@ public class MazeGenerator extends Application {
             lastField = field;
         }
 
+        gc.setFill(Color.web("#37ffa3"));
+        for (MazeField segmentLessField : segmentLessFields) {
+            double x = x0 + segmentLessField.x() * fieldSize;
+            double y = y0 + segmentLessField.y() * fieldSize;
+            double f = 0.2f;
+
+            gc.fillPolygon(new double[]{x, x + f * fieldSize, x}, new double[]{y, y, y + f * fieldSize}, 3);
+            gc.fillPolygon(new double[]{x + fieldSize, x + fieldSize - f * fieldSize, x + fieldSize}, new double[]{y + fieldSize, y + fieldSize, y + fieldSize - f * fieldSize}, 3);
+            gc.fillPolygon(new double[]{
+                    x,
+                    x,
+                    x + fieldSize - f * fieldSize,
+                    x + fieldSize,
+                    x + fieldSize,
+                    x + f * fieldSize
+            }, new double[]{
+                    y + fieldSize,
+                    y + fieldSize - f * fieldSize,
+                    y,
+                    y,
+                    y + f * fieldSize,
+                    y + fieldSize
+            }, 6);
+        }
+        gc.fillRect(x0 + (start.x() + 0.4) * fieldSize, y0 + (start.y() + 0.4) * fieldSize, 0.2 * fieldSize, 0.2 * fieldSize);
+        gc.fillRect(x0 + (end.x() + 0.2) * fieldSize, y0 + (end.y() + 0.2) * fieldSize, 0.6 * fieldSize, 0.6 * fieldSize);
+        gc.setFill(Color.BLACK);
+        gc.fillRect(x0 + (end.x() + 0.4) * fieldSize, y0 + (end.y() + 0.4) * fieldSize, 0.2 * fieldSize, 0.2 * fieldSize);
+
         if (generatorStarted) {
             int w = 400;
             int h = 50;
@@ -257,6 +335,7 @@ public class MazeGenerator extends Application {
             gc.setLineWidth(1);
             gc.setStroke(Color.web("#37ffa3"));
             gc.strokeRect(x, y, w, h);
+            gc.setFill(Color.BLACK);
             gc.fillRect(x, y, w, h);
             gc.setFill(Color.web("#37ffa3"));
             gc.fillRect(x + off, y + off, (w - 2 * off) - ((w - 2 * off) * ((double) segmentCount / (width * height))), h - 2 * off);
@@ -275,6 +354,6 @@ public class MazeGenerator extends Application {
 
     private void resetPath() {
         path.clear();
-        path.add(new MazeField(0, 0));
+        path.add(start);
     }
 }
